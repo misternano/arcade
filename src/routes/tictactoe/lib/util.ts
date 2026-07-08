@@ -1,3 +1,5 @@
+import { isInBounds, type Coord } from "$lib/gameUtils";
+
 export enum Move {
 	X = "X",
 	O = "O",
@@ -12,7 +14,6 @@ export enum State {
 
 export type Cell = Move.X | Move.O | Move.Empty;
 export type Board = ReadonlyArray<ReadonlyArray<Cell>>;
-export type Coord = readonly [row: number, col: number];
 
 export interface EvaluateOptions {
 	winLength?: number;
@@ -54,10 +55,6 @@ const assertSquareBoard = (board: Board): number => {
 	return n;
 }
 
-const inBounds = (n: number, r: number, c: number): boolean => {
-	return r >= 0 && r < n && c >= 0 && c < n;
-}
-
 const allFilled = (board: Board): boolean => {
 	for (const row of board) {
 		for (const cell of row) {
@@ -92,7 +89,7 @@ const findWinningLine = (
 				for (let k = 1; k < winLength; k++) {
 					rr += dr;
 					cc += dc;
-					if (!inBounds(n, rr, cc)) break;
+					if (!isInBounds(n, n, rr, cc)) break;
 					if (board[rr][cc] !== start) break;
 					cells.push([rr, cc]);
 				}

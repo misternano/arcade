@@ -1,4 +1,5 @@
 import { derived, get, writable, type Readable } from "svelte/store"
+import { shuffle, type Rng } from "$lib/gameUtils"
 
 export const SUITS = ["S", "H", "D", "C"] as const
 export type Suit = (typeof SUITS)[number]
@@ -67,16 +68,7 @@ export const newDeck = (): Card[] => {
 	return d
 }
 
-export const shuffle = <T>(arr: ReadonlyArray<T>, rng: () => number = Math.random): T[] => {
-	const a = arr.slice()
-	for (let i = a.length - 1; i > 0; i--) {
-		const j = Math.floor(rng() * (i + 1))
-		;[a[i], a[j]] = [a[j], a[i]]
-	}
-	return a
-}
-
-export const buildShoe = (decks = DEFAULT_RULES.decks, rng: () => number = Math.random): Card[] => {
+export const buildShoe = (decks = DEFAULT_RULES.decks, rng: Rng = Math.random): Card[] => {
 	const all: Card[] = []
 	for (let i = 0; i < decks; i++) all.push(...newDeck())
 	return shuffle(all, rng)
@@ -112,7 +104,7 @@ export const handValue = (hand: ReadonlyArray<Card>): HandValue => {
 	return { total, soft, busted, blackjack }
 }
 
-export const initGame = (rules: Partial<GameRules> = {}, rng: () => number = Math.random): GameState => {
+export const initGame = (rules: Partial<GameRules> = {}, rng: Rng = Math.random): GameState => {
 	const r = { ...DEFAULT_RULES, ...rules }
 	return {
 		shoe: buildShoe(r.decks, rng),
@@ -141,13 +133,13 @@ const setCurrentHand = (gs: GameState, hand: ReadonlyArray<Card>): GameState => 
 	return { ...gs, playerHands: hands }
 }
 
-const ensureShoe = (gs: GameState, rules: GameRules, rng: () => number): GameState => {
+const ensureShoe = (gs: GameState, rules: GameRules, rng: Rng): GameState => {
 	if (gs.shoe.length > 0) return gs
 	if (gs.discard.length > 0) return { ...gs, shoe: shuffle(gs.discard, rng), discard: [] }
 	return { ...gs, shoe: buildShoe(rules.decks, rng), discard: [] }
 }
 
-const draw = (gs: GameState, rules: GameRules, rng: () => number): [GameState, Card] => {
+const draw = (gs: GameState, rules: GameRules, rng: Rng): [GameState, Card] => {
 	const next = ensureShoe(gs, rules, rng)
 	const shoe = next.shoe
 	const card = shoe[shoe.length - 1] as Card
@@ -189,7 +181,7 @@ const dealerShouldHit = (dv: HandValue, rules: GameRules): boolean => {
 	return rules.dealerHitsSoft17 ? dv.soft : false
 }
 
-export const dealerStep = (gs: GameState, rules: GameRules, rng: () => number = Math.random): GameState => {
+export const dealerStep = (gs: GameState, rules: GameRules, rng: Rng = Math.random): GameState => {
 	if (gs.round !== "dealer") return gs
 	
 	const dv = handValue(gs.dealer)
@@ -226,7 +218,7 @@ const advanceHandOrDealer = (gs: GameState): GameState => {
 	return startDealer(gs)
 }
 
-export const deal = (gs: GameState, rules: GameRules, rng: () => number = Math.random): GameState => {
+export const deal = (gs: GameState, rules: GameRules, rng: Rng = Math.random): GameState => {
 	if (gs.round === "playing" || gs.round === "dealer") return gs
 	
 	let tries = 0
@@ -272,7 +264,7 @@ export const deal = (gs: GameState, rules: GameRules, rng: () => number = Math.r
 	}
 }
 
-export const hit = (gs: GameState, rules: GameRules, rng: () => number = Math.random): GameState => {
+export const hit = (gs: GameState, rules: GameRules, rng: Rng = Math.random): GameState => {
 	if (gs.round !== "playing") return gs
 	if (gs.doubled[gs.activeHand]) return gs
 	
@@ -297,7 +289,7 @@ export const isTenValue = (rank: Rank): boolean => {
 	return rank === "10" || rank === "J" || rank === "Q" || rank === "K"
 }
 
-export const split = (gs: GameState, rules: GameRules, rng: () => number = Math.random): GameState => {
+export const split = (gs: GameState, rules: GameRules, rng: Rng = Math.random): GameState => {
 	if (gs.round !== "playing") return gs
 	
 	const h = currentHand(gs)
@@ -326,7 +318,7 @@ export const split = (gs: GameState, rules: GameRules, rng: () => number = Math.
 	return { ...next, playerHands: hands, doubled, message: "Your move" }
 }
 
-export const doubleDown = (gs: GameState, rules: GameRules, rng: () => number = Math.random): GameState => {
+export const doubleDown = (gs: GameState, rules: GameRules, rng: Rng = Math.random): GameState => {
 	if (gs.round !== "playing") return gs
 	if (gs.doubled[gs.activeHand]) return gs
 	
@@ -345,7 +337,7 @@ export const doubleDown = (gs: GameState, rules: GameRules, rng: () => number = 
 	return advanceHandOrDealer({ ...next, activeHand: next.activeHand + 1 })
 }
 
-export const resetShoe = (_: GameState, rules: GameRules, rng: () => number = Math.random): GameState => {
+export const resetShoe = (_: GameState, rules: GameRules, rng: Rng = Math.random): GameState => {
 	return initGame(rules, rng)
 }
 
@@ -384,7 +376,7 @@ export const reducer = (
 	state: GameState,
 	action: Action,
 	rules: GameRules,
-	rng: () => number = Math.random
+	rng: Rng = Math.random
 ): GameState => {
 	switch (action.type) {
 		case "setRules":
@@ -428,7 +420,7 @@ export type BlackjackStore = Readonly<{
 
 export const createBlackjackStore = (
 	initialRules: Partial<GameRules> = {},
-	rng: () => number = Math.random
+	rng: Rng = Math.random
 ): BlackjackStore => {
 	const rulesStore = writable<GameRules>({ ...DEFAULT_RULES, ...initialRules })
 	const stateStore = writable<GameState>(initGame(get(rulesStore), rng))

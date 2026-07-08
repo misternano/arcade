@@ -32,14 +32,14 @@
 	const scheduleApplyCustom = () => {
 		if (selectedDifficulty !== "custom") return;
 
-		if (customApplyTimer != null) window.clearTimeout(customApplyTimer);
+		if (customApplyTimer != null) clearTimeout(customApplyTimer);
 		customApplyTimer = window.setTimeout(() => {
 			startPreset("custom");
 		}, 250);
 	};
 
 	onDestroy(() => {
-		if (customApplyTimer != null) window.clearTimeout(customApplyTimer);
+		if (customApplyTimer != null) clearTimeout(customApplyTimer);
 	});
 
 	const formatTime = (secs: number) => {

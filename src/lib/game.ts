@@ -51,6 +51,7 @@ export const normalizePathname = (pathname: string): string => {
 export const syncLastGameFromPath = (pathname: string) => {
 	const p = normalizePathname(pathname);
 	const g = GAMES.find((x) => x.path === p);
-	if (!g) return;
+	if (!g) return null;
 	setLastGame({ slug: g.slug, name: g.name, path: g.path, updatedAt: Date.now() });
+	return g;
 };

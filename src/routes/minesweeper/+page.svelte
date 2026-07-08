@@ -3,36 +3,48 @@
 	import { Board, GameHeader } from "./components";
 	import { minesweeper } from "./lib/util";
 	import { onDestroy, onMount } from "svelte";
-	import { browser } from "$app/environment";
+	import { watchDebugFlag, type StopWatchingDebug } from "$lib/debug";
+	import { unlockAchievement } from "$lib/achievements";
 
 	onMount(() => {
-		debug = readDebug();
-		debugTimer = window.setInterval(() => {
-			const next = readDebug();
+		stopDebug = watchDebugFlag("minesweeper", (next) => {
 			if (next !== debug) debug = next;
-		}, 1000);
+		});
 		console.info(`%c> Mounted`, "background-color:#1c68d4;color:white;padding:4rem;padding-block:0.5rem;width:100%;");
 	})
 
-	const onReveal = (r: number, c: number) => minesweeper.reveal(r, c);
-	const onFlag = (r: number, c: number) => minesweeper.flag(r, c);
+	const onReveal = (r: number, c: number) => {
+		const cell = $minesweeper.grid[r]?.[c];
+		const safeRemainingBefore = $minesweeper.difficulty.rows * $minesweeper.difficulty.cols - $minesweeper.difficulty.mines - $minesweeper.revealedSafe;
+		const flagsBefore = $minesweeper.flags;
+		if (cell && !cell.revealed && !cell.flagged && !cell.mine && cell.adj >= 3) unlockAchievement("minesweeper-brave-click");
+		minesweeper.reveal(r, c);
+		if (safeRemainingBefore === 1 && flagsBefore === $minesweeper.difficulty.mines - 1) unlockAchievement("minesweeper-one-left");
+	};
+	const onFlag = (r: number, c: number) => {
+		const cell = $minesweeper.grid[r]?.[c];
+		minesweeper.flag(r, c);
+		if (cell && !cell.revealed && !cell.flagged) {
+			manualFlagsThisGame++;
+			unlockAchievement("minesweeper-first-flag");
+		}
+	};
 	const onChord = (r: number, c: number) => minesweeper.chord(r, c);
 
-	const reset = () => minesweeper.reset();
+	const reset = () => {
+		resetThisGame = true;
+		manualFlagsThisGame = 0;
+		minesweeper.reset();
+	};
 
 	// Handling debug menu
 	let debug = false
-	let debugTimer: number | null = null
-
-	const readDebug = () => {
-		if (!browser) return false;
-		return (
-			localStorage.getItem("minesweeper:debug") === "1" ||
-			localStorage.getItem("arcade:debug") === "1"
-		);
-	}
+	let stopDebug: StopWatchingDebug | null = null
 
 	let hovered: { r: number, c: number } | null = null;
+	let manualFlagsThisGame = 0;
+	let resetThisGame = false;
+	let lastStatus = $minesweeper.status;
 	const onHover = (r: number, c: number) => (hovered = { r, c });
 	const onLeave = () => (hovered = null)
 
@@ -48,8 +60,23 @@
 		return "empty";
 	})();
 
+	$: if (lastStatus !== $minesweeper.status) {
+		if ($minesweeper.status === "ready") {
+			manualFlagsThisGame = 0;
+			resetThisGame = false;
+		}
+		lastStatus = $minesweeper.status;
+	}
+
+	$: if ($minesweeper.status === "won") {
+		unlockAchievement("win-minesweeper");
+		if (manualFlagsThisGame === 0) unlockAchievement("minesweeper-no-flags");
+		if (!resetThisGame) unlockAchievement("minesweeper-perfect-sweep");
+		if ($minesweeper.difficulty.key === "beginner" && $minesweeper.elapsedMs <= 60_000) unlockAchievement("minesweeper-speed-sweep");
+	}
+
 	onDestroy(() => {
-		if (debugTimer != null) window.clearInterval(debugTimer);
+		stopDebug?.();
 	});
 </script>
 

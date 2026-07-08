@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { tick } from "svelte";
 	import { ShieldQuestionMark } from "lucide-svelte";
+	import { unlockAchievement } from "$lib/achievements";
 
 	const faqs: Array<{ q: string; a: string }> = [
 		{
@@ -45,6 +46,7 @@
 		if (idx === -1) return;
 
 		openedIndex = idx;
+		unlockAchievement("open-faq");
 
 		await tick();
 		faqSectionEl?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -112,6 +114,7 @@
 							class="cursor-pointer select-none text-neutral-200"
 							on:click|preventDefault={() => {
 								openedIndex = openedIndex === i ? null : i;
+								if (openedIndex !== null) unlockAchievement("open-faq");
 							}}
 						>
 							{item.q}

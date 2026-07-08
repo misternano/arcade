@@ -1,8 +1,9 @@
 <script lang="ts">
-	import { SIZE, generatePuzzleBoard } from "./lib/util"
-	import type { Board } from "./lib/util"
+	import { DIGITS, SIZE, cellKey, computeConflicts, generatePuzzleBoard, isBoardComplete, isDigit } from "./lib/util"
+	import type { Board, Cell, Digit } from "./lib/util"
 	import { Selector } from "./components";
 	import { onMount } from "svelte";
+	import { unlockAchievement } from "$lib/achievements";
 
 	onMount(() => {
 		console.info(`%c> Mounted`, "background-color:#1c68d4;color:white;padding:4rem;padding-block:0.5rem");
@@ -14,82 +15,9 @@
 	let noteMode = false
 	let conflictSet: Set<string> = new Set()
 	let hasWon = false
-
-	const cellKey = (r: number, c: number) => {
-		return `${r}-${c}`
-	}
-
-	const computeConflicts = (b: Board): Set<string> => {
-		const conflicts = new Set<string>()
-
-		for (let r = 0; r < SIZE; r++) {
-			const seen: Record<number, [number, number][]> = {}
-			for (let c = 0; c < SIZE; c++) {
-				const v = b[r][c].value
-				if (v === null) continue
-				if (!seen[v]) seen[v] = []
-				seen[v].push([r, c])
-			}
-			for (const v in seen) {
-				if (seen[v].length > 1) {
-					for (const [rr, cc] of seen[v]) {
-						conflicts.add(cellKey(rr, cc))
-					}
-				}
-			}
-		}
-
-		for (let c = 0; c < SIZE; c++) {
-			const seen: Record<number, [number, number][]> = {}
-			for (let r = 0; r < SIZE; r++) {
-				const v = b[r][c].value
-				if (v === null) continue
-				if (!seen[v]) seen[v] = []
-				seen[v].push([r, c])
-			}
-			for (const v in seen) {
-				if (seen[v].length > 1) {
-					for (const [rr, cc] of seen[v]) {
-						conflicts.add(cellKey(rr, cc))
-					}
-				}
-			}
-		}
-
-		for (let br = 0; br < 3; br++) {
-			for (let bc = 0; bc < 3; bc++) {
-				const seen: Record<number, [number, number][]> = {}
-				const startR = br * 3
-				const startC = bc * 3
-				for (let r = startR; r < startR + 3; r++) {
-					for (let c = startC; c < startC + 3; c++) {
-						const v = b[r][c].value
-						if (v === null) continue
-						if (!seen[v]) seen[v] = []
-						seen[v].push([r, c])
-					}
-				}
-				for (const v in seen) {
-					if (seen[v].length > 1) {
-						for (const [rr, cc] of seen[v]) {
-							conflicts.add(cellKey(rr, cc))
-						}
-					}
-				}
-			}
-		}
-
-		return conflicts
-	}
-
-	const isBoardComplete = (b: Board) => {
-		for (let r = 0; r < SIZE; r++) {
-			for (let c = 0; c < SIZE; c++) {
-				if (b[r][c].value === null) return false
-			}
-		}
-		return true
-	}
+	let hadConflict = false
+	let clearedCell = false
+	let startedAt = Date.now()
 
 	const clearSelection = () => {
 		selectedRow = null
@@ -103,10 +31,20 @@
 		selectedCol = null
 		noteMode = false
 		hasWon = false
+		hadConflict = false
+		clearedCell = false
+		startedAt = Date.now()
 	}
 
 	$: conflictSet = computeConflicts(board)
+	$: if (conflictSet.size > 0) hadConflict = true
 	$: hasWon = isBoardComplete(board) && conflictSet.size === 0
+	$: if (hasWon) {
+		unlockAchievement("win-sudoku")
+		if (!hadConflict) unlockAchievement("sudoku-clean-board")
+		if (!clearedCell) unlockAchievement("sudoku-no-eraser")
+		if (Date.now() - startedAt <= 10 * 60 * 1000) unlockAchievement("sudoku-fast-logic")
+	}
 
 	const selectCell = (r: number, c: number) => {
 		if (board[r][c].fixed) return
@@ -114,13 +52,13 @@
 		selectedCol = c
 	}
 
-	const updateCell = (r: number, c: number, updater: (cell: Board[0][0]) => Board[0][0]) => {
+	const updateCell = (r: number, c: number, updater: (cell: Cell) => Cell) => {
 		board = board.map((row, ri) =>
 			row.map((cell, ci) => (ri === r && ci === c ? updater(cell) : cell))
 		)
 	}
 
-	const handleDigitInput = (d: number) => {
+	const handleDigitInput = (d: Digit) => {
 		if (selectedRow === null || selectedCol === null) return
 		const r = selectedRow
 		const c = selectedCol
@@ -128,12 +66,19 @@
 		if (cell.fixed) return
 
 		if (noteMode) {
+			unlockAchievement("sudoku-pencil-brain")
 			const has = cell.notes.includes(d)
-			const notes = has ? cell.notes.filter((n) => n !== d) : [...cell.notes, d].sort()
+			const notes = has ? cell.notes.filter((n) => n !== d) : [...cell.notes, d].sort((a, b) => a - b)
 			updateCell(r, c, (old) => ({ ...old, notes }))
 		} else {
 			const value = cell.value === d ? null : d
+			const emptyBefore = board.flat().filter((item) => item.value === null).length
+			if (value === null) clearedCell = true
 			updateCell(r, c, (old) => ({ ...old, value, notes: [] }))
+			if (value !== null) {
+				unlockAchievement("sudoku-first-fill")
+				if (emptyBefore === 1) unlockAchievement("sudoku-last-square")
+			}
 		}
 	}
 
@@ -143,6 +88,7 @@
 		const c = selectedCol
 		const cell = board[r][c]
 		if (cell.fixed) return
+		if (cell.value !== null || cell.notes.length > 0) clearedCell = true
 		updateCell(r, c, (old) => ({ ...old, value: null, notes: [] }))
 	}
 
@@ -182,14 +128,14 @@
 		}
 
 		const num = parseInt(e.key, 10)
-		if (num >= 1 && num <= 9) {
+		if (isDigit(num)) {
 			e.preventDefault()
 			handleDigitInput(num)
 		}
 	}
 
 	const handleNumberButtonClick = (d: number) => {
-		handleDigitInput(d)
+		if (isDigit(d)) handleDigitInput(d)
 	}
 
 	type Letter = {
@@ -272,9 +218,9 @@
 							<span class="relative z-10">{cell.value}</span>
 						{:else if cell.notes.length > 0}
 							<div class="relative z-10 grid grid-cols-3 gap-[1px] text-[0.55rem] leading-none">
-								{#each Array(9) as _, i}
+								{#each DIGITS as digit}
 								<span class="h-3 w-3 text-center font-bold">
-									{cell.notes.includes(i + 1) ? i + 1 : ""}
+									{cell.notes.includes(digit) ? digit : ""}
 								</span>
 								{/each}
 							</div>

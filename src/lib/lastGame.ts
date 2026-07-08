@@ -1,5 +1,5 @@
-import { browser } from "$app/environment";
 import { writable } from "svelte/store";
+import { readJsonStorage, STORAGE_KEYS, writeJsonStorage } from "./storage";
 
 export type LastGame = {
 	slug: string;
@@ -8,27 +8,13 @@ export type LastGame = {
 	updatedAt: number;
 }
 
-const KEY = "arcade:lastGame"
-
 const read = (): LastGame | null => {
-	if (!browser) return null
-	try {
-		const raw = localStorage.getItem(KEY)
-		return raw ? (JSON.parse(raw) as LastGame) : null
-	} catch (_) {
-		console.error(`[Issue reading ${KEY}]: `,_)
-		return null
-	}
+	return readJsonStorage<LastGame | null>(STORAGE_KEYS.arcade.lastGame, null)
 }
 
 export const lastGame = writable<LastGame | null>(read())
 
 export const setLastGame = (v: LastGame) => {
 	lastGame.set(v)
-	if (!browser) return
-	try {
-		localStorage.setItem(KEY, JSON.stringify(v))
-	} catch (_) {
-		console.error(`[Issue writing ${KEY}]: `,_)
-	}
+	writeJsonStorage(STORAGE_KEYS.arcade.lastGame, v)
 }

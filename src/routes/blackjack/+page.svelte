@@ -2,21 +2,19 @@
 	import { onDestroy, onMount } from "svelte"
 	import { get } from "svelte/store"
 	import { Hand, Chip } from "./components"
-	import { createBlackjackStore, outcomeMessage, isTenValue, type GameRules, type GameState } from "./lib/util"
+	import { createBlackjackStore, handValue, outcomeMessage, isTenValue, type GameRules, type GameState } from "./lib/util"
 	import { HandCoins, Spade } from "lucide-svelte"
-	import { browser } from "$app/environment";
+	import { readNumberStorage, STORAGE_KEYS, writeNumberStorage } from "$lib/storage";
+	import { watchDebugFlag, type StopWatchingDebug } from "$lib/debug";
+	import { incrementAchievementProgress, markAchievementProgress, readAchievementProgress, unlockAchievement, unlockBlackjackChipAchievements } from "$lib/achievements";
 
 	onMount(() => {
-		debug = readDebug();
-		debugTimer = window.setInterval(() => {
-			const next = readDebug();
+		stopDebug = watchDebugFlag("blackjack", (next) => {
 			if (next !== debug) debug = next;
-		}, 1000);
+		});
 		try {
-			const raw = localStorage.getItem("blackjack:chips")
-			const parsed = raw ? Number(raw) : NaN
-			if (Number.isFinite(parsed) && parsed >= 0) chips = parsed
-			else localStorage.setItem("blackjack:chips", "1000")
+			chips = readNumberStorage(STORAGE_KEYS.games.blackjack.chips, 1000, { min: 0 })
+			writeNumberStorage(STORAGE_KEYS.games.blackjack.chips, chips)
 		} catch (_) {
 			console.error("[Error mounting blackjack:chips] ",_)
 		}
@@ -64,14 +62,16 @@
 	let betShimmerId = 0
 	let chipDeltaTextId = 0
 	let lastChipDelta = 0
+	let blackjackWinStreak = 0
+	let doubledThisRound = false
+	let stoodOn17ThisRound = false
 
 	const saveChips = (n: number) => {
 		chips = n
-		try {
-			localStorage.setItem("blackjack:chips", String(chips))
-		} catch(_) {
-			console.error("[Error saving blackjack:chips] ",_)
-		}
+		writeNumberStorage(STORAGE_KEYS.games.blackjack.chips, chips)
+		if (chips < 500) markAchievementProgress("blackjack-dipped-below-500")
+		if (chips >= 1500 && readAchievementProgress("blackjack-dipped-below-500", false)) unlockAchievement("blackjack-comeback-kid")
+		unlockBlackjackChipAchievements(chips)
 	}
 
 	const shimmerChips = () => {
@@ -155,6 +155,8 @@
 		bets = [b]
 
 		settled = false
+		doubledThisRound = false
+		stoodOn17ThisRound = false
 		lastPayout = 0
 		lastChipDelta = 0
 		roundId++
@@ -177,6 +179,7 @@
 	}
 
 	const doStand = () => {
+		if (handValue(cur).total === 17) stoodOn17ThisRound = true
 		bj.dispatch({ type: "stand" })
 	}
 
@@ -198,6 +201,7 @@
 		saveChips(chips - add)
 		bets = bets.slice()
 		bets[gs.activeHand] = add * 2
+		doubledThisRound = true
 
 		bj.dispatch({ type: "doubleDown" })
 	}
@@ -215,7 +219,20 @@
 		shimmerChips()
 		shimmerBet()
 
-		saveChips(chips + payout)
+		const nextChips = chips + payout
+		if (gs.outcome === "player_blackjack") unlockAchievement("blackjack-natural")
+		if (gs.outcome === "push") unlockAchievement("blackjack-push-it")
+		if (gs.outcome === "dealer_bust") incrementAchievementProgress("blackjack-dealer-busts", 5, "blackjack-dealer-problem")
+		if (gs.outcome === "player_blackjack" || gs.outcome === "player_win" || gs.outcome === "dealer_bust") {
+			unlockAchievement("win-blackjack")
+			blackjackWinStreak++
+			if (blackjackWinStreak >= 3) unlockAchievement("blackjack-bust-proof")
+			if (doubledThisRound) unlockAchievement("blackjack-double-trouble")
+			if (stoodOn17ThisRound) unlockAchievement("blackjack-hard-stop")
+		} else {
+			blackjackWinStreak = 0
+		}
+		saveChips(nextChips)
 		settled = true
 	}
 
@@ -248,18 +265,10 @@
 
 	// Handling debug menu
 	let debug = false
-	let debugTimer: number | null = null
-
-	const readDebug = () => {
-		if (!browser) return false;
-		return (
-			localStorage.getItem("blackjack:debug") === "1" ||
-			localStorage.getItem("arcade:debug") === "1"
-		);
-	}
+	let stopDebug: StopWatchingDebug | null = null
 
 	onDestroy(() => {
-		if (debugTimer != null) window.clearInterval(debugTimer);
+		stopDebug?.();
 	});
 </script>
 
@@ -301,7 +310,7 @@
 	{/if}
 </header>
 
-<main class="flex items-center justify-center">
+<main class="flex items-center justify-center mx-6">
 	<div class="w-full max-w-xl space-y-4">
 		<div class="flex items-center justify-between">
 			<div class="text-white/60">

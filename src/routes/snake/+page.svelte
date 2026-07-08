@@ -3,18 +3,18 @@
 	import { Worm } from "lucide-svelte";
 	import { swipe } from "svelte-gestures";
 	import { onDestroy, onMount } from "svelte";
-	import { browser } from "$app/environment";
+	import { readNumberStorage, STORAGE_KEYS, writeNumberStorage } from "$lib/storage";
+	import { watchDebugFlag, type StopWatchingDebug } from "$lib/debug";
+	import { unlockAchievement, unlockSnakeScoreAchievements } from "$lib/achievements";
 
 	onMount(() => {
-		debug = readDebug();
-		debugTimer = window.setInterval(() => {
-			const next = readDebug();
+		stopDebug = watchDebugFlag("snake", (next) => {
 			if (next !== debug) debug = next;
-		}, 1000);
+		});
 		try {
 			drawSnake();
 			play();
-			highestScore = parseInt(localStorage.getItem("snake:hiScore") || "0");
+			highestScore = loadHighestScore();
 			console.info(`%c> Mounted`, "background-color:#1c68d4;color:white;padding:4rem;padding-block:0.5rem");
 		} catch (_) {
 			console.error("[Error mounting snake:hiScore] ",_)
@@ -35,8 +35,19 @@
 	let queuedDir: Dir | null = null;
 
 	let apple: [number, number] | null = null;
-	let highestScore: number;
+	let highestScore = 0;
 	let score: number = 0;
+	let playTimer: ReturnType<typeof setTimeout> | null = null;
+	let destroyed = false;
+	let pausedThisRun = false;
+
+	const loadHighestScore = () => {
+		return readNumberStorage(STORAGE_KEYS.games.snake.hiScore, 0, { min: 0 });
+	};
+
+	const saveHighestScore = () => {
+		writeNumberStorage(STORAGE_KEYS.games.snake.hiScore, highestScore);
+	};
 
 	const isOpposite = (a: Dir, b: Dir) =>
 		(a === "YU" && b === "YD") ||
@@ -69,6 +80,8 @@
 	};
 
 	const play = () => {
+		if (destroyed) return;
+
 		if (state === State.Playing) {
 			if (queuedDir) {
 				curDir = queuedDir;
@@ -97,7 +110,8 @@
 			}
 
 			if (snake.slice(1).find(([x, y]) => x === snake[0][0] && y === snake[0][1])) {
-				localStorage.setItem("snake:hiScore", highestScore.toString());
+				if (score === 1) unlockAchievement("snake-tiny-appetite");
+				saveHighestScore();
 				state = State.End;
 				return;
 			}
@@ -112,8 +126,17 @@
 				if (apple) {
 					snake.push(prevHead);
 					score++;
+					unlockSnakeScoreAchievements(score);
+					if (score >= 30 && !pausedThisRun) unlockAchievement("snake-no-brakes");
 				}
 				apple = getAppleCoordinates();
+			}
+
+			if (
+				snake.length >= 5 &&
+				snake.slice(1).some(([x, y]) => Math.abs(x - snake[0][0]) + Math.abs(y - snake[0][1]) === 1)
+			) {
+				unlockAchievement("snake-close-call");
 			}
 
 			if (score > highestScore) highestScore = score;
@@ -121,11 +144,14 @@
 			drawSnake();
 		}
 
-		setTimeout(play, 150);
+		playTimer = setTimeout(play, 150);
 	};
 
 	const togglePause = () => {
-		if (state === State.Playing) state = State.Paused;
+		if (state === State.Playing) {
+			pausedThisRun = true;
+			state = State.Paused;
+		}
 		else if (state === State.Paused) state = State.Playing;
 		else {
 			apple = getAppleCoordinates();
@@ -134,8 +160,9 @@
 			curDir = "YD";
 			queuedDir = null;
 
-			highestScore = parseInt(localStorage.getItem("snake:hiScore") || "0");
+			highestScore = loadHighestScore();
 			score = 0;
+			pausedThisRun = false;
 			state = State.Paused;
 			drawSnake();
 			play();
@@ -143,6 +170,10 @@
 	};
 
 	const onKeyDown = (e: KeyboardEvent) => {
+		const handledKeys = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "a", "d", "w", "s", " "]);
+		if (!handledKeys.has(e.key)) return;
+		e.preventDefault();
+
 		if (state === State.Playing) {
 			switch (e.key) {
 				case "ArrowLeft":
@@ -169,22 +200,16 @@
 
 	// Handling debug menu
 	let debug = false
-	let debugTimer: number | null = null
-
-	const readDebug = () => {
-		if (!browser) return false;
-		return (
-			localStorage.getItem("snake:debug") === "1" ||
-			localStorage.getItem("arcade:debug") === "1"
-		);
-	}
+	let stopDebug: StopWatchingDebug | null = null
 
 	onDestroy(() => {
-		if (debugTimer != null) window.clearInterval(debugTimer);
+		destroyed = true;
+		if (playTimer != null) clearTimeout(playTimer);
+		stopDebug?.();
 	});
 </script>
 
-<svelte:window on:keydown|preventDefault={onKeyDown} />
+<svelte:window on:keydown={onKeyDown} />
 
 {#if debug}
 	<div class="w-1/6 absolute right-3 top-16 text-xs text-white/70 border border-white/10 bg-white/5 rounded-lg p-3 space-y-1">

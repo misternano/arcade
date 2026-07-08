@@ -1,4 +1,5 @@
 import { derived, get, type Readable, writable } from "svelte/store";
+import { createMatrix, isInBounds, shuffleInPlace, type Coord } from "$lib/gameUtils";
 
 export type GameStatus = "ready" | "playing" | "won" | "lost";
 
@@ -63,24 +64,22 @@ export function createInitialState(difficulty: Difficulty): GameState {
 }
 
 export function createBlankGrid(rows: number, cols: number): Cell[][] {
-	return Array.from({ length: rows }, (_, row) =>
-		Array.from({ length: cols }, (_, col) => ({
-			row,
-			col,
-			mine: false,
-			adj: 0,
-			revealed: false,
-			flagged: false
-		}))
-	);
+	return createMatrix(rows, cols, (row, col) => ({
+		row,
+		col,
+		mine: false,
+		adj: 0,
+		revealed: false,
+		flagged: false
+	}));
 }
 
 export function inBounds(grid: Cell[][], row: number, col: number): boolean {
-	return row >= 0 && col >= 0 && row < grid.length && col < grid[0].length;
+	return isInBounds(grid.length, grid[0].length, row, col);
 }
 
-export function neighbors8(grid: Cell[][], row: number, col: number): Array<[number, number]> {
-	const out: Array<[number, number]> = [];
+export function neighbors8(grid: Cell[][], row: number, col: number): Coord[] {
+	const out: Coord[] = [];
 	for (let dr = -1; dr <= 1; dr++) {
 		for (let dc = -1; dc <= 1; dc++) {
 			if (dr === 0 && dc === 0) continue;
@@ -256,7 +255,7 @@ export function maybeWin(state: GameState): GameState {
 }
 
 function floodReveal(grid: Cell[][], startR: number, startC: number): { revealedSafeDelta: number } {
-	const q: Array<[number, number]> = [[startR, startC]];
+	const q: Coord[] = [[startR, startC]];
 	let revealedSafeDelta = 0;
 	
 	while (q.length) {
@@ -283,13 +282,6 @@ function cloneGrid(grid: Cell[][]): Cell[][] {
 	return grid.map((row) => row.map((c) => ({ ...c })));
 }
 
-function shuffleInPlace<T>(arr: T[]): void {
-	for (let i = arr.length - 1; i > 0; i--) {
-		const j = Math.floor(Math.random() * (i + 1));
-		[arr[i], arr[j]] = [arr[j], arr[i]];
-	}
-}
-
 type MinesweeperStore = Readable<GameState> & {
 	newGame: (difficultyKey?: DifficultyKey, custom?: { rows: number; cols: number; mines: number }) => void;
 	reset: () => void;
@@ -311,7 +303,7 @@ export function createMinesweeperStore(): MinesweeperStore {
 	const initial = createInitialState(DIFFICULTIES.beginner);
 	const { subscribe, set, update } = writable<GameState>(initial);
 	
-	let timerId: number | null = null;
+	let timerId: ReturnType<typeof setInterval> | null = null;
 	
 	const stopTimer = () => {
 		if (timerId != null) {
@@ -322,7 +314,7 @@ export function createMinesweeperStore(): MinesweeperStore {
 	
 	const startTimerIfNeeded = () => {
 		if (timerId != null) return;
-		timerId = window.setInterval(() => {
+		timerId = setInterval(() => {
 			update((s) => {
 				if (s.status !== "playing" || s.startedAtMs == null) return s;
 				return { ...s, elapsedMs: Date.now() - s.startedAtMs };

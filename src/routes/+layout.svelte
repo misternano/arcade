@@ -1,26 +1,24 @@
 <script lang="ts">
 	import "../app.css";
-	import { Zap, X, Menu, ChevronLeft, ChevronRight, ArrowBigLeft, CircleQuestionMark } from "lucide-svelte";
+	import { Zap, X, Menu, ChevronLeft, ChevronRight, ArrowBigLeft, CircleQuestionMark, Trophy } from "lucide-svelte";
 	import { NavBarGames } from "./components";
 	import { page } from "$app/stores";
 	import { normalizePathname, syncLastGameFromPath } from "$lib/game";
 	import { afterNavigate } from "$app/navigation";
 	import { onMount } from "svelte";
+	import { readJsonStorage, STORAGE_KEYS, writeJsonStorage } from "$lib/storage";
+	import { achievementToasts, dismissAchievementToast, recordArcadeVisit, unlockGameOpened } from "$lib/achievements";
+	import type { AchievementCategory } from "$lib/achievements";
 
 	let open = false;
 	const close = () => (open = false);
 	const toggle = () => (open = !open);
 
-	const STORAGE_KEY = "arcade:menu";
 	let collapsed = false;
 
 	const setCollapsed = (value: boolean) => {
 		collapsed = value;
-		try {
-			localStorage.setItem(STORAGE_KEY, JSON.stringify({ collapsed: value }));
-		} catch (_) {
-			console.error("[Couldn't mount arcade:menu]: ",_)
-		}
+		writeJsonStorage(STORAGE_KEYS.arcade.menu, { collapsed: value });
 	};
 
 	const toggleCollapsed = () => setCollapsed(!collapsed);
@@ -28,15 +26,9 @@
 	afterNavigate(() => close());
 
 	onMount(() => {
-		try {
-			const raw = localStorage.getItem(STORAGE_KEY);
-			if (raw) {
-				const parsed = JSON.parse(raw) as { collapsed?: boolean };
-				if (typeof parsed?.collapsed === "boolean") collapsed = parsed.collapsed;
-			}
-		} catch (_) {
-			console.log("[Couldn't load arcade:menu]: ",_)
-		}
+		recordArcadeVisit();
+		const parsed = readJsonStorage<{ collapsed?: boolean } | null>(STORAGE_KEYS.arcade.menu, null);
+		if (typeof parsed?.collapsed === "boolean") collapsed = parsed.collapsed;
 
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (e.key === "Escape") close();
@@ -49,7 +41,17 @@
 		return classes.filter(Boolean).join(" ");
 	}
 
-	$: syncLastGameFromPath(normalizePathname($page.url.pathname));
+	const toastAccent: Record<AchievementCategory, string> = {
+		arcade: "border-amber-400/40 shadow-amber-950/30",
+		tictactoe: "border-sky-400/40 shadow-sky-950/30",
+		sudoku: "border-indigo-400/40 shadow-indigo-950/30",
+		snake: "border-emerald-400/40 shadow-emerald-950/30",
+		blackjack: "border-rose-400/40 shadow-rose-950/30",
+		minesweeper: "border-cyan-400/40 shadow-cyan-950/30"
+	};
+
+	$: currentGame = syncLastGameFromPath(normalizePathname($page.url.pathname));
+	$: if (currentGame) unlockGameOpened(currentGame.slug);
 
 	$: sidebarWidth = collapsed ? "4.25rem" : "15.5rem";
 </script>
@@ -113,6 +115,17 @@
 						<ArrowBigLeft size="16" class="fill-black stroke-black transition group-hover:scale-110" />
 						<span class={cn("block", collapsed && "hidden")}>Return Home</span>
 					{/if}
+				</a>
+
+				<a
+					href="/achievements"
+					class={cn(
+						"group inline-flex items-center gap-2 rounded-xl bg-slate-950/35 px-3 py-2 text-sm font-bold text-slate-100 ring-1 ring-indigo-400/30 transition hover:bg-indigo-500/20 hover:ring-indigo-300/60 active:scale-[0.98]",
+						collapsed && "justify-center px-2"
+					)}
+				>
+					<Trophy size="16" class="stroke-[#ecba16] transition group-hover:scale-110 group-hover:rotate-6" />
+					<span class={cn("block", collapsed && "hidden")}>Achievements</span>
 				</a>
 
 				<div class="flex flex-row gap-2 justify-between items-stretch">
@@ -182,6 +195,17 @@
 
 		{#if open}
 			<div class="md:hidden mt-2 rounded-2xl bg-slate-900/70 backdrop-blur-md shadow-lg ring-1 ring-white/10 p-2">
+				<a
+					href="/achievements"
+					class="mb-2 flex items-center justify-between gap-3 rounded-xl px-4 py-3 text-base font-semibold text-slate-100 transition hover:bg-indigo-500/20 active:scale-[0.99]"
+					on:click={close}
+				>
+					<span class="inline-flex items-center gap-3">
+						<Trophy size="18" class="stroke-[#ecba16]" />
+						Achievements
+					</span>
+					<ChevronRight size="16" />
+				</a>
 				<button
 					class={cn(
 						"flex flex-row gap-2 flex-wrap",
@@ -204,3 +228,35 @@
 <div class="layout" style={`--sidebar-w:${sidebarWidth};`}>
 	<slot />
 </div>
+
+{#if $achievementToasts.length}
+	<div class="fixed bottom-4 right-4 z-[80] flex w-[min(22rem,calc(100vw-2rem))] flex-col gap-2 md:bottom-5 md:right-5" aria-live="polite" aria-atomic="false">
+		{#each $achievementToasts as toast (toast.id)}
+			<section
+				class={cn(
+					"rounded-2xl border bg-slate-950/90 p-3 text-slate-100 shadow-2xl backdrop-blur-md ring-1 ring-white/10",
+					toastAccent[toast.category]
+				)}
+			>
+				<div class="flex items-start gap-3">
+					<div class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#ecba16]/10 ring-1 ring-[#ecba16]/35">
+						<Trophy size="20" class="stroke-[#ecba16]" />
+					</div>
+					<div class="min-w-0 flex-1">
+						<p class="text-[0.65rem] font-semibold uppercase tracking-[0.22em] text-indigo-300">Achievement unlocked</p>
+						<p class="mt-1 truncate text-sm font-semibold text-neutral-100">{toast.title}</p>
+						<p class="mt-1 line-clamp-2 text-xs leading-relaxed text-neutral-500">{toast.description}</p>
+					</div>
+					<button
+						type="button"
+						class="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-neutral-500 transition hover:bg-white/10 hover:text-neutral-100"
+						aria-label="Dismiss achievement notification"
+						on:click={() => dismissAchievementToast(toast.id)}
+					>
+						<X size="14" />
+					</button>
+				</div>
+			</section>
+		{/each}
+	</div>
+{/if}

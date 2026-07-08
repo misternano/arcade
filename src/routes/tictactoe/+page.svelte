@@ -3,6 +3,11 @@
 	import { Icon } from "./components"
 	import { onDestroy, onMount, tick } from "svelte"
 	import { ArrowBigRight, ChevronDown, LoaderCircle } from "lucide-svelte"
+	import { browser } from "$app/environment"
+	import { incrementAchievementProgress, unlockAchievement } from "$lib/achievements"
+
+	const WS_CONNECTING = 0
+	const WS_OPEN = 1
 
 	onMount(() => {
 		window.addEventListener("resize", onResize)
@@ -47,10 +52,26 @@
 
 	let awaitingStateAfterReset = false
 	let roundStarter: Move.X | Move.O = Move.O
+	let opponentThreatSeen = false
+	let cornerOpeningThisRound = false
+	let finishedBoardKey = ""
 
 	$: evaluation = safeEvaluate(board)
 	$: winner = evaluation.winner ?? undefined
 	$: state = evaluation.state
+	$: if (state === State.Won) {
+		unlockAchievement("win-tictactoe")
+		if (opponentThreatSeen) unlockAchievement("tictactoe-comeback-line")
+		if (cornerOpeningThisRound) unlockAchievement("tictactoe-corner-pocket")
+	}
+	$: if (state === State.Draw) {
+		unlockAchievement("draw-tictactoe")
+		const key = board.flat().join("")
+		if (key && key !== finishedBoardKey) {
+			finishedBoardKey = key
+			incrementAchievementProgress("tictactoe-draws", 3, "tictactoe-cats-game-3")
+		}
+	}
 
 	let winningKeySet = new Set<string>()
 	let winIndexByKey = new Map<string, number>()
@@ -63,6 +84,51 @@
 
 	const isWinningCell = (r: number, c: number) => winningKeySet.has(`${r}:${c}`)
 	const winDelayMs = (r: number, c: number) => (winIndexByKey.get(`${r}:${c}`) ?? 0) * 90
+
+	const winLines: Array<Array<[number, number]>> = [
+		[[0, 0], [0, 1], [0, 2]],
+		[[1, 0], [1, 1], [1, 2]],
+		[[2, 0], [2, 1], [2, 2]],
+		[[0, 0], [1, 0], [2, 0]],
+		[[0, 1], [1, 1], [2, 1]],
+		[[0, 2], [1, 2], [2, 2]],
+		[[0, 0], [1, 1], [2, 2]],
+		[[0, 2], [1, 1], [2, 0]]
+	]
+
+	const boardMoveCount = (b: Move[][]) => b.flat().filter((cell) => cell !== Move.Empty).length
+	const isCorner = (r: number, c: number) => (r === 0 || r === 2) && (c === 0 || c === 2)
+
+	const lineThreats = (b: Move[][], mark: Move.X | Move.O) => {
+		return winLines.filter((line) => {
+			const cells = line.map(([r, c]) => b[r][c])
+			return cells.filter((cell) => cell === mark).length === 2 && cells.includes(Move.Empty)
+		})
+	}
+
+	const blocksImmediateWin = (b: Move[][], r: number, c: number, mark: Move.X | Move.O) => {
+		const opponent = opponentOf(mark)
+		return lineThreats(b, opponent).some((line) =>
+			line.some(([lr, lc]) => lr === r && lc === c)
+		)
+	}
+
+	const boardWithMove = (b: Move[][], r: number, c: number, mark: Move.X | Move.O) => {
+		return b.map((row, ri) => row.map((cell, ci) => (ri === r && ci === c ? mark : cell)))
+	}
+
+	const noteTicTacToeMoveAchievements = (r: number, c: number) => {
+		if (board[r][c] !== Move.Empty) return
+		const mark = turn as Move.X | Move.O
+		const count = boardMoveCount(board)
+		if (count === 0 && r === 1 && c === 1) unlockAchievement("tictactoe-center-stage")
+		const openedFromCorner = count === 0 && isCorner(r, c)
+		if (blocksImmediateWin(board, r, c, mark)) unlockAchievement("tictactoe-block-party")
+		if (lineThreats(board, opponentOf(mark)).length > 0) opponentThreatSeen = true
+		const nextBoard = boardWithMove(board, r, c, mark)
+		if (lineThreats(nextBoard, mark).length >= 2) unlockAchievement("tictactoe-forklift")
+		if (openedFromCorner) cornerOpeningThisRound = true
+	}
 
 	type Point = { x: number; y: number }
 	let showWinLine = false
@@ -169,7 +235,7 @@
 	const canSendCursor = () =>
 		Boolean(
 			ws &&
-			ws.readyState === WebSocket.OPEN &&
+			ws.readyState === WS_OPEN &&
 			roomCode &&
 			youAre &&
 			state === State.Playing &&
@@ -191,7 +257,7 @@
 	}
 
 	const sendCursorLeave = () => {
-		if (!ws || ws.readyState !== WebSocket.OPEN) return
+		if (!ws || ws.readyState !== WS_OPEN) return
 		if (!roomCode) return
 		try {
 			ws.send(JSON.stringify({ type: "cursor_leave" }))
@@ -266,6 +332,9 @@
 
 				if (isEmptyBoard(board) && (turn === Move.X || turn === Move.O)) {
 					roundStarter = turn
+					opponentThreatSeen = false
+					cornerOpeningThisRound = false
+					finishedBoardKey = ""
 				}
 
 				awaitingStateAfterReset = false
@@ -311,7 +380,7 @@
 			const c = normalize(code)
 			if (c.length !== 6) return reject(new Error("bad code"))
 
-			if (ws?.readyState === WebSocket.OPEN && roomCode === c) return resolve()
+			if (ws?.readyState === WS_OPEN && roomCode === c) return resolve()
 			if (ws) {
 				try {
 					ws.close()
@@ -347,7 +416,7 @@
 		})
 
 	const sendJson = async (payload: unknown) => {
-		if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error("not open")
+		if (!ws || ws.readyState !== WS_OPEN) throw new Error("not open")
 		ws.send(JSON.stringify(payload))
 	}
 
@@ -390,6 +459,7 @@
 		if (!roomCode) return
 		if (!yourTurn) return
 		try {
+			noteTicTacToeMoveAchievements(r, c)
 			pendingFocus = true
 			await sendJson({ type: "move", r, c })
 		} catch {
@@ -425,6 +495,8 @@
 	$: opponent = youAre ? players.find((p) => p.mark !== youAre)?.name : undefined
 
 	onDestroy(() => {
+		if (!browser) return
+
 		window.removeEventListener("resize", onResize)
 
 		if (staleTimer) clearTimeout(staleTimer)
@@ -628,12 +700,12 @@
 					if (!roomCode) await createRoom()
 					else await navigator.clipboard.writeText(roomCode)
 				}}
-				disabled={!connected && ws?.readyState === WebSocket.CONNECTING}
+				disabled={!connected && ws?.readyState === WS_CONNECTING}
 			>
 				{#if roomCode}
 					<span class="tracking-[0.25em] uppercase font-mono">{roomCode}</span>
 				{:else}
-					{#if ws?.readyState === WebSocket.CONNECTING}
+					{#if ws?.readyState === WS_CONNECTING}
 						<LoaderCircle size="16" class="animate-spin" />
 					{/if}
 					Create Room
