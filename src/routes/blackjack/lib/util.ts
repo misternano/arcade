@@ -51,7 +51,7 @@ export const DEFAULT_RULES: GameRules = {
 	decks: 6,
 	dealerHitsSoft17: false,
 	allowTenValueSplit: false,
-	avoidInitialBlackjacks: true,
+	avoidInitialBlackjacks: false,
 	maxDealTries: 20
 }
 
